@@ -1,36 +1,112 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Zovi — B2B Marketplace
 
-## Getting Started
+A B2B marketplace connecting verified buyers and suppliers, with escrow-protected
+checkout, in-order messaging, and company verification against government
+registries (AADE for Greece, VIES for the rest of the EU).
 
-First, run the development server:
+Built with Next.js 15 (App Router), PostgreSQL/Prisma, Redis, and Meilisearch.
+
+## What's in here
+
+**Three roles, one app:**
+- **Buyer** — browse/search the marketplace, buy products (creates an escrow-backed
+  order), chat with the supplier per-order, approve/reject freight quotes, mark
+  orders delivered to release escrowed funds.
+- **Supplier** — list products with image upload, manage stock, quote freight on
+  incoming orders, chat with buyers, archive/restore/permanently delete products.
+- **Super Admin** — KPI overview, fraud & communication audit feed (masked vs.
+  unmasked chat content), escrow dispute queue. Mandatory 2FA, edge-middleware
+  gated (`/admin/*` 404s for anyone without the role, hiding its existence).
+
+**Security:**
+- Argon2id password hashing, Redis-backed login rate limiting (5 attempts / 15 min)
+- Mandatory TOTP 2FA for suppliers and admins, optional for buyers — enrollment
+  happens on first login rather than blocking accounts that haven't set it up yet
+- Company registration is verified against AADE (Greece) or VIES (EU) before an
+  account is created
+- In-order chat auto-masks phone numbers, emails, and IBANs before storage
+
+**Commerce flow:**
+1. Buyer purchases a product → order created, merchandise value held in escrow, stock decremented
+2. Supplier reviews and submits a freight quote (or free shipping)
+3. Buyer approves (order ships) or rejects (order cancelled, no penalty)
+4. Buyer marks the order delivered → escrow releases to the supplier
+5. Cancelled orders can be deleted once resolved; active vs. completed/cancelled
+   are split into separate tabs so the dashboard doesn't fill up with old history
+
+## Stack
+
+| Layer | Choice |
+|---|---|
+| Framework | Next.js 15 (App Router, TypeScript) |
+| Database | PostgreSQL via Prisma ORM |
+| Cache / sessions | Redis |
+| Search | Meilisearch (typo-tolerant product search, falls back to Postgres if unreachable) |
+| Auth | JWT sessions (jose), Argon2id, otplib (TOTP) |
+| Images | Sharp (resize + WebP conversion on upload) |
+| UI | Tailwind CSS v4, shadcn/ui (base-ui), Material Symbols |
+
+## Getting started
+
+Requires Docker (for Postgres/Redis/Meilisearch) and Node 20+.
 
 ```bash
+# 1. Start local infra
+docker compose up -d
+
+# 2. Install dependencies
+npm install
+
+# 3. Copy env template and fill in secrets
+cp .env.example .env
+
+# 4. Push the schema and seed demo data
+npx prisma db push
+npm run db:seed
+
+# 5. Run the dev server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Demo accounts (from `npm run db:seed`)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+All use password `DemoPass123!`.
 
-## Learn More
+| Role | Email | 2FA |
+|---|---|---|
+| Buyer | `buyer@zovi.test` | none |
+| Supplier | `supplier@zovi.test` | required (seeded secret — see `prisma/seed.ts`) |
+| Admin | `admin@zovi.test` | required (seeded secret — see `prisma/seed.ts`) |
 
-To learn more about Next.js, take a look at the following resources:
+### Environment variables
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+See [`.env.example`](.env.example). Notably:
+- `DATABASE_URL`, `REDIS_URL`, `MEILI_MASTER_KEY` — local infra, matches `docker-compose.yml`
+- `AADE_API_USER` / `AADE_API_KEY` — Greek tax registry credentials for company verification (registration will correctly fail closed without these — no bypass)
+- `VIES_API_URL` — EU VAT registry, no credentials needed (public endpoint)
+- `VIVA_*` — payment/escrow settlement credentials (not yet wired to a live processor; escrow is currently simulated in the database)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Project structure
 
-## Deploy on Vercel
+```
+app/
+  (auth)/login, register/       # public auth pages
+  (dashboard)/buyer, supplier,  # role dashboards, product catalog, orders, settings
+    products, orders, watchlist, settings/
+  admin/                        # super-admin only, edge-middleware gated
+  api/                          # route handlers (auth, products, orders, chat)
+components/
+  ui/                           # shadcn primitives
+  shared/                       # app shell, order/product actions, chat thread
+lib/                            # prisma/redis clients, auth, masking, search, storage
+prisma/schema.prisma            # data model
+middleware.ts                   # edge auth gate for /admin
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Known gaps
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Escrow settlement is simulated in Postgres, not wired to a real payment
+  processor — `VIVA_*` env vars are placeholders for that integration.
+- No automated test suite yet.

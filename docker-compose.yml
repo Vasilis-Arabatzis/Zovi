@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: zovi_postgres_local
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - zovi_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: zovi_redis_local
+    ports:
+      - "6379:6379"
+    networks:
+      - zovi_network
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.6
+    container_name: zovi_meilisearch_local
+    ports:
+      - "7700:7700"
+    environment:
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
+      - MEILI_ENV=development
+    volumes:
+      - meili_data:/meili_data
+    networks:
+      - zovi_network
+
+volumes:
+  postgres_data:
+  meili_data:
+
+networks:
+  zovi_network:
+    driver: bridge
